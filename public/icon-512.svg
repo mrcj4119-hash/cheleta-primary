@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cheleta SMS logo">
+  <rect width="512" height="512" rx="88" fill="#143d59"/>
+  <path d="M120 320V188c0-24 20-44 44-44h146c24 0 44 20 44 44v132H120Zm70-80h32v52h-32v-52Zm98 0h32v52h-32v-52Zm-122 96h230v34H166v-34Z" fill="#f7fbff"/>
+  <circle cx="328" cy="156" r="48" fill="#f5c46c"/>
+</svg>
