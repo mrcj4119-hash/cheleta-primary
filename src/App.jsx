@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import SchoolTools from './SchoolTools';
 
-const roles = ['ADMIN', 'TEACHER', 'PARENT', 'CSR_PARTNER', 'STUDENT', 'BOARD', 'STAFF'];
-const demoRoles = ['ADMIN', 'TEACHER', 'PARENT', 'CSR_PARTNER', 'STUDENT'];
+const roles = ['ADMIN', 'TEACHER', 'PARENT', 'STUDENT', 'BOARD', 'STAFF'];
+const demoRoles = ['ADMIN', 'TEACHER', 'PARENT', 'STUDENT'];
 const rubricLevels = ['EE', 'ME', 'AE', 'BE'];
 const attendanceStatuses = ['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'];
 const demoLogins = {
   ADMIN: { email: 'admin@cheleta.test', password: 'admin123' },
   TEACHER: { email: 'teacher@cheleta.test', password: 'teacher123' },
   PARENT: { email: 'parent@cheleta.test', password: 'parent123' },
-  CSR_PARTNER: { email: 'csr@cheleta.test', password: 'csr123' },
   STUDENT: { email: 'student@cheleta.test', password: 'student123' }
 };
-
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyLearner = { firstName: '', lastName: '', grade: 1, className: '', stream: 'A', support: 'On track', status: 'ACTIVE' };
 const emptyTeacher = { name: '', email: '', phone: '', qualification: '', classes: '', password: '', status: 'ACTIVE' };
 const emptyClass = { className: '', grade: 7 };
-const emptyAccount = { name: '', email: '', password: '', role: 'STAFF', learnerId: '' };
+const emptyAccount = { name: '', email: '', password: '', role: 'STUDENT', learnerId: '' };
+const emptyParentRegistration = { name: '', email: '', password: '', confirmPassword: '', phone: '', smsOptIn: false };
 const emptyLearningResource = { category: 'SUBJECT_NOTES', subject: '', title: '', grade: '', content: '', questionsText: '' };
 const emptyMentorshipProgram = { title: '', description: '', mentor: '', grade: '' };
 const emptySuggestion = { subject: '', suggestion: '' };
@@ -72,8 +72,10 @@ function App() {
   const [assessments, setAssessments] = useState([]);
   const [impact, setImpact] = useState([]);
   const [queue, setQueue] = useState([]);
-  const [installPrompt, setInstallPrompt] = useState(null);
   const [loginForm, setLoginForm] = useState({ ...demoLogins.ADMIN, role: 'ADMIN' });
+  const [authMode, setAuthMode] = useState('login');
+  const [parentRegistration, setParentRegistration] = useState(emptyParentRegistration);
+  const [parentLinkSelections, setParentLinkSelections] = useState({});
   const [learnerForm, setLearnerForm] = useState(emptyLearner);
   const [learnerEditId, setLearnerEditId] = useState(null);
   const [teacherForm, setTeacherForm] = useState(emptyTeacher);
@@ -96,9 +98,13 @@ function App() {
   const [busy, setBusy] = useState(false);
   const offlineStorageKey = user ? `cheleta-offline-queue:${user.id}` : '';
   const loadGeneration = useRef(0);
+  const authenticatedRequest = useCallback(
+    (path, options = {}) => apiRequest(path, token, options),
+    [token]
+  );
 
   const canManageTeachers = user?.role === 'ADMIN';
-  const canCreateLearners = ['ADMIN', 'TEACHER'].includes(user?.role);
+  const canCreateLearners = user?.role === 'ADMIN';
   const canManageLearners = user?.role === 'ADMIN';
   const canWriteAssessments = ['ADMIN', 'TEACHER'].includes(user?.role);
   const canWriteAttendance = ['ADMIN', 'TEACHER'].includes(user?.role);
@@ -133,7 +139,7 @@ function App() {
       apiRequest('/api/resources', activeToken)
     ];
     const restrictedRequests = [
-      !['CSR_PARTNER', 'BOARD'].includes(activeUser.role)
+      activeUser.role !== 'BOARD'
         ? apiRequest('/api/learners', activeToken)
         : Promise.resolve([]),
       activeUser.role === 'ADMIN'
@@ -166,7 +172,7 @@ function App() {
       ['ADMIN', 'TEACHER', 'PARENT', 'STUDENT', 'STAFF'].includes(activeUser.role)
         ? apiRequest('/api/assessments', activeToken)
         : Promise.resolve([]),
-      ['ADMIN', 'CSR_PARTNER'].includes(activeUser.role)
+      activeUser.role === 'ADMIN'
         ? apiRequest('/api/impact', activeToken)
         : Promise.resolve([])
     ];
@@ -246,17 +252,11 @@ function App() {
   useEffect(() => {
     const onOnline = () => setIsOnline(true);
     const onOffline = () => setIsOnline(false);
-    const onInstallPrompt = (event) => {
-      event.preventDefault();
-      setInstallPrompt(event);
-    };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
-    window.addEventListener('beforeinstallprompt', onInstallPrompt);
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
-      window.removeEventListener('beforeinstallprompt', onInstallPrompt);
     };
   }, []);
 
@@ -279,6 +279,40 @@ function App() {
       setUser(result.user);
       setSection('Dashboard');
       setStatusText(`Signed in as ${result.user.name}.`);
+    } catch (error) {
+      setStatusText(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleParentRegistration = async (event) => {
+    event.preventDefault();
+    if (parentRegistration.password !== parentRegistration.confirmPassword) {
+      setStatusText('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await apiRequest('/api/register/parent', '', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: parentRegistration.name,
+          email: parentRegistration.email,
+          password: parentRegistration.password,
+          phone: parentRegistration.phone,
+          smsOptIn: parentRegistration.smsOptIn
+        })
+      });
+      loadGeneration.current += 1;
+      clearUserData();
+      sessionStorage.setItem('cheleta-token', result.token);
+      setToken(result.token);
+      setUser(result.user);
+      setSection('Dashboard');
+      setAuthMode('login');
+      setParentRegistration(emptyParentRegistration);
+      setStatusText('Account created. The school administrator will link your learner before records are available.');
     } catch (error) {
       setStatusText(error.message);
     } finally {
@@ -365,6 +399,28 @@ function App() {
       });
       setAccountForm(emptyAccount);
       setStatusText('School account created.');
+      await refreshData();
+    } catch (error) {
+      setStatusText(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linkParentLearner = async (account) => {
+    const learnerId = Number(parentLinkSelections[account.id]);
+    if (!learnerId) {
+      setStatusText('Select a learner to link to this parent account.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiRequest(`/api/parents/${account.id}/learners`, token, {
+        method: 'POST',
+        body: JSON.stringify({ learnerId })
+      });
+      setParentLinkSelections((current) => ({ ...current, [account.id]: '' }));
+      setStatusText(`Learner linked to ${account.name}.`);
       await refreshData();
     } catch (error) {
       setStatusText(error.message);
@@ -656,16 +712,6 @@ function App() {
     }
   };
 
-  const installPwa = async () => {
-    if (!installPrompt) {
-      setStatusText('Install is available from your browser menu when supported.');
-      return;
-    }
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
-  };
-
   const editLearner = (learner) => {
     setLearnerForm({
       firstName: learner.firstName,
@@ -710,7 +756,7 @@ function App() {
 
   const navigation = [
     { id: 'Dashboard', label: user?.role === 'PARENT' ? 'Home' : user?.role === 'BOARD' ? 'School progress' : 'Dashboard' },
-    ...(!['CSR_PARTNER', 'BOARD'].includes(user?.role)
+    ...(user?.role !== 'BOARD'
       ? [{ id: 'Learners', label: user?.role === 'PARENT' ? 'My learner' : 'Learners' }]
       : []),
     ...(canManageTeachers ? [{ id: 'Teachers', label: 'Teachers' }] : []),
@@ -730,9 +776,21 @@ function App() {
     ...(['ADMIN', 'TEACHER', 'PARENT', 'STUDENT', 'STAFF'].includes(user?.role)
       ? [
           { id: 'Assessments', label: user?.role === 'PARENT' ? 'Learning progress' : 'Assessments' },
-          { id: 'Attendance', label: 'Attendance' }
+          { id: 'Attendance', label: 'Attendance' },
+          { id: 'Timetable', label: 'Timetable' },
+          { id: 'LessonPlans', label: 'Lesson planning' },
+          { id: 'ReportCards', label: 'Report cards' },
+          { id: 'Notifications', label: 'Notifications' },
+          { id: 'Library', label: 'Library & inventory' },
+          { id: 'Exports', label: 'Data exports' }
         ]
-      : [])
+      : []),
+    ...(user?.role === 'ADMIN' ? [
+      { id: 'Wellbeing', label: 'Wellbeing & safeguarding' },
+      { id: 'AdminReports', label: 'School reports' },
+      { id: 'Backups', label: 'Data backup' }
+    ] : []),
+    ...(user?.role === 'TEACHER' ? [{ id: 'Wellbeing', label: 'Learner support' }] : [])
   ];
   const sectionTitle = navigation.find((item) => item.id === section)?.label || section;
 
@@ -743,13 +801,6 @@ function App() {
           <p className="eyebrow">Cheleta Primary School</p>
           <h1>Cheleta SMS</h1>
         </div>
-        <div className="topbar-actions">
-          <div className={isOnline ? 'connection-status online' : 'connection-status offline'}>
-            <span className="dot" />
-            {isOnline ? 'Online' : 'Offline — changes will sync'}
-          </div>
-          <button className="secondary" onClick={installPwa}>Install app</button>
-        </div>
       </header>
 
       {!user ? (
@@ -759,25 +810,45 @@ function App() {
               <p className="eyebrow accent">School management</p>
               <h2>Connecting learning, learners, teachers and families.</h2>
               <p className="hero-copy">Sign in to access learner records, attendance, CBC assessments and school updates.</p>
+              <div className="badge">Student · Staff · Family · Board</div>
             </div>
-            <div className="badge">Student · Staff · Family · Board</div>
           </section>
           <section className="card login-card">
-            <h2>Sign in</h2>
-            <p className="muted">Sign in with your school account.</p>
-            <form onSubmit={handleLogin} className="form-grid">
-              <label>Email<input required type="email" autoComplete="username" value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
-              <label>Password<input required type="password" autoComplete="current-password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
-              <label>Role<select value={loginForm.role} onChange={(event) => chooseDemoRole(event.target.value)}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
-              <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-            </form>
-            <div className="demo-accounts">
-              {demoRoles.map((role) => (
-                <button className="secondary" type="button" key={role} onClick={() => chooseDemoRole(role)}>
-                  {role.replace('_', ' ')}
-                </button>
-              ))}
-            </div>
+            {authMode === 'login' ? (
+              <>
+                <h2>Sign in</h2>
+                <p className="muted">Sign in with your school account.</p>
+                <form onSubmit={handleLogin} className="form-grid">
+                  <label>Email<input required type="email" autoComplete="username" value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
+                  <label>Password<input required type="password" autoComplete="current-password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
+                  <label>Role<select value={loginForm.role} onChange={(event) => chooseDemoRole(event.target.value)}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+                  <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+                </form>
+                <div className="demo-accounts">
+                  {demoRoles.map((role) => (
+                    <button className="secondary" type="button" key={role} onClick={() => chooseDemoRole(role)}>
+                      {role.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+                <p className="muted">Are you a parent? <button className="text-button" type="button" onClick={() => { setAuthMode('register'); setStatusText(''); }}>Create an account</button></p>
+              </>
+            ) : (
+              <>
+                <h2>Create a parent account</h2>
+                <p className="muted">Create your own sign-in. A school administrator will link your learner to your account.</p>
+                <form onSubmit={handleParentRegistration} className="form-grid">
+                  <label>Full name<input required maxLength="120" autoComplete="name" value={parentRegistration.name} onChange={(event) => setParentRegistration({ ...parentRegistration, name: event.target.value })} /></label>
+                  <label>Email<input required type="email" maxLength="254" autoComplete="email" value={parentRegistration.email} onChange={(event) => setParentRegistration({ ...parentRegistration, email: event.target.value })} /></label>
+                  <label>Password<input required type="password" minLength="8" autoComplete="new-password" value={parentRegistration.password} onChange={(event) => setParentRegistration({ ...parentRegistration, password: event.target.value })} /></label>
+                  <label>Confirm password<input required type="password" minLength="8" autoComplete="new-password" value={parentRegistration.confirmPassword} onChange={(event) => setParentRegistration({ ...parentRegistration, confirmPassword: event.target.value })} /></label>
+                  <label>Mobile number for SMS alerts<input type="tel" placeholder="+254712345678" value={parentRegistration.phone} onChange={(event) => setParentRegistration({ ...parentRegistration, phone: event.target.value })} /></label>
+                  <label className="checkbox-label"><input type="checkbox" checked={parentRegistration.smsOptIn} onChange={(event) => setParentRegistration({ ...parentRegistration, smsOptIn: event.target.checked })} /> I agree to receive school alerts by SMS.</label>
+                  <button className="primary" disabled={busy}>{busy ? 'Creating account…' : 'Create parent account'}</button>
+                </form>
+                <p className="muted">Already have an account? <button className="text-button" type="button" onClick={() => { setAuthMode('login'); setStatusText(''); }}>Sign in</button></p>
+              </>
+            )}
             {statusText && <p className="status" role="status">{statusText}</p>}
           </section>
         </main>
@@ -809,8 +880,7 @@ function App() {
               ))}
             </nav>
             <div className="offline-indicator">
-              <span className={isOnline ? 'dot' : 'dot warning-dot'} />
-              {isOnline ? 'Online' : 'Offline'} · {queue.length} pending
+              {queue.length} pending
             </div>
             <button className="secondary full signout" onClick={signOut}>Sign out</button>
             {statusText && <p className="status" role="status">{statusText}</p>}
@@ -889,17 +959,12 @@ function App() {
                       <div key={item.id} className="item-row"><div><strong>{item.title}</strong><p>{item.message}</p></div><span>{item.priority}</span></div>
                     )) : <p className="muted">No announcements are available yet.</p>}
                   </section>
-                  {user.role === 'CSR_PARTNER' ? (
-                    <section className="card panel">
-                      <h3>Aggregate CSR impact</h3>
-                      {impact.map((entry) => <div key={entry.label} className="item-row"><div><strong>{entry.label}</strong><p>{entry.caption}</p></div><span>{entry.value}</span></div>)}
-                    </section>
-                  ) : (
-                    <section className="card panel">
-                      <h3>Learning resources</h3>
-                      {resources.length ? resources.map((resource) => <div key={resource.id} className="item-row"><div><strong>{resource.title}</strong><p>{resource.subject}</p></div><span>{resource.type}</span></div>) : <p className="muted">No resources have been published yet.</p>}
-                    </section>
-                  )}
+                  <section className="card panel">
+                    <h3>{user.role === 'ADMIN' ? 'School-wide impact' : 'Learning resources'}</h3>
+                    {user.role === 'ADMIN'
+                      ? impact.map((entry) => <div key={entry.label} className="item-row"><div><strong>{entry.label}</strong><p>{entry.caption}</p></div><span>{entry.value}</span></div>)
+                      : resources.length ? resources.map((resource) => <div key={resource.id} className="item-row"><div><strong>{resource.title}</strong><p>{resource.subject}</p></div><span>{resource.type}</span></div>) : <p className="muted">No resources have been published yet.</p>}
+                  </section>
                 </div>
               </>
             )}
@@ -987,20 +1052,19 @@ function App() {
               <>
                 <section className="card panel">
                   <h3>Add a school account</h3>
-                  <p className="muted">Create sign-ins for non-teaching staff, Board members, or learners. Teacher accounts are managed in the Teachers section.</p>
+                  <p className="muted">Create student sign-ins for registered learners. Teacher accounts are managed in the Teachers section; parents register for their own accounts.</p>
                   <form className="form-grid form-grid-three" onSubmit={saveAccount}>
                     <label>Full name<input required maxLength="120" value={accountForm.name} onChange={(event) => setAccountForm({ ...accountForm, name: event.target.value })} /></label>
                     <label>Email<input required type="email" value={accountForm.email} onChange={(event) => setAccountForm({ ...accountForm, email: event.target.value })} /></label>
                     <label>Temporary password<input required type="password" minLength="8" autoComplete="new-password" value={accountForm.password} onChange={(event) => setAccountForm({ ...accountForm, password: event.target.value })} /></label>
-                    <label>Account type<select value={accountForm.role} onChange={(event) => setAccountForm({ ...accountForm, role: event.target.value, learnerId: '' })}><option value="STAFF">School staff</option><option value="BOARD">Board of Management</option><option value="STUDENT">Learner</option></select></label>
-                    {accountForm.role === 'STUDENT' && <label>Learner<select required value={accountForm.learnerId} onChange={(event) => setAccountForm({ ...accountForm, learnerId: event.target.value })}><option value="">Select learner</option>{activeLearners.filter((learner) => !staffAccounts.some((account) => account.role === 'STUDENT' && account.status === 'ACTIVE' && account.learnerId === learner.id)).map((learner) => <option key={learner.id} value={learner.id}>{learner.name} · {learner.className}</option>)}</select></label>}
+                    <label>Learner<select required value={accountForm.learnerId} onChange={(event) => setAccountForm({ ...accountForm, learnerId: event.target.value })}><option value="">Select learner</option>{activeLearners.filter((learner) => !staffAccounts.some((account) => account.role === 'STUDENT' && account.status === 'ACTIVE' && account.learnerId === learner.id)).map((learner) => <option key={learner.id} value={learner.id}>{learner.name} · {learner.className}</option>)}</select></label>
                     <div className="form-actions"><button className="primary" disabled={busy}>Create account</button></div>
                   </form>
                 </section>
                 <section className="card panel">
                   <h3>School accounts <span className="count-badge">{staffAccounts.length}</span></h3>
                   <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Learner</th><th>Status</th><th>Manage</th></tr></thead><tbody>
-                    {staffAccounts.map((account) => <tr key={account.id}><td>{account.name}</td><td>{account.email}</td><td>{account.role}</td><td>{account.learner || '—'}</td><td>{account.status}</td><td>{account.status === 'ACTIVE' && <button className="secondary small-button" onClick={() => deactivateAccount(account)}>Deactivate</button>}</td></tr>)}
+                    {staffAccounts.map((account) => <tr key={account.id}><td>{account.name}</td><td>{account.email}</td><td>{account.role}</td><td>{account.learner || '—'}{account.role === 'PARENT' && account.status === 'ACTIVE' && <div className="parent-link-control"><select aria-label={`Learner to link to ${account.name}`} value={parentLinkSelections[account.id] || ''} onChange={(event) => setParentLinkSelections({ ...parentLinkSelections, [account.id]: event.target.value })}><option value="">Link learner…</option>{activeLearners.filter((learner) => !account.learnerIds.includes(learner.id)).map((learner) => <option key={learner.id} value={learner.id}>{learner.name} · {learner.className}</option>)}</select><button className="secondary small-button" disabled={busy || !parentLinkSelections[account.id]} onClick={() => linkParentLearner(account)}>Link</button></div>}</td><td>{account.status}</td><td>{account.status === 'ACTIVE' && !['ADMIN', 'TEACHER'].includes(account.role) && <button className="secondary small-button" onClick={() => deactivateAccount(account)}>Deactivate</button>}</td></tr>)}
                   </tbody></table></div>
                 </section>
               </>
@@ -1190,6 +1254,19 @@ function App() {
                   {filteredAttendance.length === 0 && <p className="muted">No attendance records match these filters.</p>}
                 </section>
               </>
+            )}
+            {['Timetable', 'LessonPlans', 'ReportCards', 'Notifications', 'Wellbeing', 'Library', 'Exports', 'AdminReports', 'Backups'].includes(section) && (
+              <SchoolTools
+                section={section}
+                token={token}
+                user={user}
+                learners={learners}
+                teachers={teachers}
+                classes={classes}
+                request={authenticatedRequest}
+                onStatus={setStatusText}
+                onUserUpdate={setUser}
+              />
             )}
           </section>
         </main>

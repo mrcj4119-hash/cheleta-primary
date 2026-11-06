@@ -204,8 +204,7 @@ function seedInitialData() {
   [
     { name: 'Admin User', email: 'admin@cheleta.test', password: 'admin123', role: 'ADMIN', teacherId: null },
     { name: teachers[0].name, email: teachers[0].email, password: 'teacher123', role: 'TEACHER', teacherId: teacherIds[0] },
-    { name: 'Parent Account', email: 'parent@cheleta.test', password: 'parent123', role: 'PARENT', teacherId: null },
-    { name: 'CSR Partner', email: 'csr@cheleta.test', password: 'csr123', role: 'CSR_PARTNER', teacherId: null }
+    { name: 'Parent Account', email: 'parent@cheleta.test', password: 'parent123', role: 'PARENT', teacherId: null }
   ].forEach((user) => {
     userIds.set(user.role, Number(insertUser.run(
       user.name,

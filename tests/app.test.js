@@ -5,7 +5,7 @@ process.env.CHELETA_DB_PATH = ':memory:';
 process.env.JWT_SECRET = 'test-only-signing-secret';
 
 const { app } = await import('../server.js');
-const { db } = await import('../database.js');
+const { db, hashPassword } = await import('../database.js');
 let server;
 let baseUrl;
 const tokens = {};
@@ -67,8 +67,7 @@ test('login rejects invalid credentials and protects private routes', async () =
   for (const [role, email, password] of [
     ['ADMIN', 'admin@cheleta.test', 'admin123'],
     ['TEACHER', 'teacher@cheleta.test', 'teacher123'],
-    ['PARENT', 'parent@cheleta.test', 'parent123'],
-    ['CSR_PARTNER', 'csr@cheleta.test', 'csr123']
+    ['PARENT', 'parent@cheleta.test', 'parent123']
   ]) {
     const login = await request('/api/login', {
       method: 'POST',
@@ -77,6 +76,12 @@ test('login rejects invalid credentials and protects private routes', async () =
     assert.equal(login.response.status, 200);
     tokens[role] = login.json.data.token;
   }
+
+  const removedCsrLogin = await request('/api/login', {
+    method: 'POST',
+    body: { email: 'csr@cheleta.test', password: 'csr123', role: 'CSR_PARTNER' }
+  });
+  assert.equal(removedCsrLogin.response.status, 400);
 });
 
 test('the three seeded student demo accounts sign in to separate learner records', async () => {
@@ -99,7 +104,7 @@ test('the three seeded student demo accounts sign in to separate learner records
   assert.equal(new Set(linkedNames).size, studentAccounts.length);
 });
 
-test('admins manage learners and teachers can register only in assigned classes', async () => {
+test('only admins can create and manage learner records', async () => {
   const created = await request('/api/learners', {
     token: tokens.ADMIN,
     method: 'POST',
@@ -146,21 +151,53 @@ test('admins manage learners and teachers can register only in assigned classes'
     method: 'POST',
     body: { firstName: 'Teacher', lastName: 'Registered', grade: 5, className: 'Grade 5A' }
   });
-  assert.equal(teacherCreated.response.status, 201);
+  assert.equal(teacherCreated.response.status, 403);
 
-  const outsideAssignedClass = await request('/api/learners', {
-    token: tokens.TEACHER,
+  const parentCreate = await request('/api/learners', {
+    token: tokens.PARENT,
     method: 'POST',
     body: { firstName: 'No', lastName: 'Access', grade: 1, className: 'Grade 1A' }
   });
-  assert.equal(outsideAssignedClass.response.status, 403);
+  assert.equal(parentCreate.response.status, 403);
+});
 
-  const denied = await request('/api/learners', {
-    token: tokens.CSR_PARTNER,
+test('parents can self-register and admins link parent accounts to learners', async () => {
+  const registered = await request('/api/register/parent', {
     method: 'POST',
-    body: { firstName: 'No', lastName: 'Access', grade: 1, className: 'Grade 1A' }
+    body: { name: 'New Parent', email: 'new.parent@cheleta.test', password: 'securePass123' }
   });
-  assert.equal(denied.response.status, 403);
+  assert.equal(registered.response.status, 201);
+  tokens.SELF_REGISTERED_PARENT = registered.json.data.token;
+
+  const unlinkedLearners = await request('/api/learners', { token: tokens.SELF_REGISTERED_PARENT });
+  assert.deepEqual(unlinkedLearners.json.data, []);
+
+  const duplicate = await request('/api/register/parent', {
+    method: 'POST',
+    body: { name: 'New Parent', email: 'new.parent@cheleta.test', password: 'securePass123' }
+  });
+  assert.equal(duplicate.response.status, 409);
+
+  const invalidPassword = await request('/api/register/parent', {
+    method: 'POST',
+    body: { name: 'Another Parent', email: 'another.parent@cheleta.test', password: 'short' }
+  });
+  assert.equal(invalidPassword.response.status, 400);
+
+  const parentId = registered.json.data.user.id;
+  const learner = (await request('/api/learners', { token: tokens.ADMIN })).json.data[0];
+  const linked = await request(`/api/parents/${parentId}/learners`, {
+    token: tokens.ADMIN,
+    method: 'POST',
+    body: { learnerId: learner.id }
+  });
+  assert.equal(linked.response.status, 201);
+
+  const linkedLearners = await request('/api/learners', { token: tokens.SELF_REGISTERED_PARENT });
+  assert.deepEqual(linkedLearners.json.data.map((item) => item.id), [learner.id]);
+  const roster = await request('/api/staff', { token: tokens.ADMIN });
+  assert.ok(roster.json.data.some((account) => account.id === parentId && account.role === 'PARENT'
+    && account.learnerIds.includes(learner.id)));
 });
 
 test('teacher management is restricted to admins', async () => {
@@ -225,7 +262,7 @@ test('teacher management is restricted to admins', async () => {
 
 test('teachers see and change attendance only for assigned classes', async () => {
   const teacherLearners = await request('/api/learners', { token: tokens.TEACHER });
-  assert.equal(teacherLearners.json.data.length, 12);
+  assert.equal(teacherLearners.json.data.length, 11);
   assert.ok(teacherLearners.json.data.every((learner) => ['Grade 5A', 'Grade 6A', 'Grade 7C'].includes(learner.className)));
 
   const forbiddenAssessment = await request('/api/assessments', {
@@ -285,15 +322,13 @@ test('admins manage classes and Grade 9 learners; classes with records are retai
   assert.equal(teacherCreateClass.response.status, 403);
 });
 
-test('parents see linked learner data only and CSR accounts cannot access learner records', async () => {
+test('parents see linked learner data only and admins can view school impact', async () => {
   const parentData = await request('/api/learners', { token: tokens.PARENT });
   assert.equal(parentData.response.status, 200);
   assert.deepEqual(parentData.json.data.map((learner) => learner.name), ['Amina Otieno']);
 
-  const csrLearners = await request('/api/learners', { token: tokens.CSR_PARTNER });
-  assert.equal(csrLearners.response.status, 403);
-  const csrImpact = await request('/api/impact', { token: tokens.CSR_PARTNER });
-  assert.equal(csrImpact.response.status, 200);
+  const adminImpact = await request('/api/impact', { token: tokens.ADMIN });
+  assert.equal(adminImpact.response.status, 200);
 
   const parentIdorAssessments = await request('/api/assessments?learnerId=2', { token: tokens.PARENT });
   assert.deepEqual(parentIdorAssessments.json.data, []);
@@ -341,33 +376,55 @@ test('parents can submit one comment per linked learner and admins can see every
     token: tokens.PARENT,
     method: 'PATCH'
   });
-  assert.equal(parentNotificationWrite.response.status, 403);
+  assert.equal(parentNotificationWrite.response.status, 200);
 });
 
-test('admins provision learner, staff, and board accounts with role-specific access', async () => {
+test('admins can create student accounts only and system accounts remain visible', async () => {
   const learner = (await request('/api/learners', { token: tokens.ADMIN })).json.data[0];
   const accounts = [];
-  for (const [role, name, email, password] of [
-    ['STUDENT', learner.name, 'student.portal@cheleta.test', 'studentPass123'],
-    ['STAFF', 'School Office Staff', 'school.staff@cheleta.test', 'staffPass123'],
-    ['BOARD', 'Board Member', 'board.member@cheleta.test', 'boardPass123']
-  ]) {
-    const created = await request('/api/staff', {
+  const created = await request('/api/staff', {
+    token: tokens.ADMIN,
+    method: 'POST',
+    body: { name: learner.name, email: 'student.portal@cheleta.test', password: 'studentPass123', role: 'STUDENT', learnerId: learner.id }
+  });
+  assert.equal(created.response.status, 201);
+  const studentLogin = await request('/api/login', {
+    method: 'POST',
+    body: { email: 'student.portal@cheleta.test', password: 'studentPass123', role: 'STUDENT' }
+  });
+  assert.equal(studentLogin.response.status, 200);
+  accounts.push({ role: 'STUDENT', token: studentLogin.json.data.token, id: created.json.data.id });
+  tokens.STUDENT = studentLogin.json.data.token;
+
+  for (const role of ['STAFF', 'BOARD', 'TEACHER', 'PARENT']) {
+    const disallowed = await request('/api/staff', {
       token: tokens.ADMIN,
       method: 'POST',
-      body: { name, email, password, role, ...(role === 'STUDENT' ? { learnerId: learner.id } : {}) }
+      body: { name: 'Restricted account', email: `restricted.${role.toLowerCase()}@cheleta.test`, password: 'restrictedPass123', role }
     });
-    assert.equal(created.response.status, 201);
-    const login = await request('/api/login', {
-      method: 'POST',
-      body: { email, password, role }
-    });
-    assert.equal(login.response.status, 200);
-    accounts.push({ role, token: login.json.data.token, id: created.json.data.id });
+    assert.equal(disallowed.response.status, 400);
   }
-  tokens.STUDENT = accounts.find((account) => account.role === 'STUDENT').token;
-  tokens.STAFF = accounts.find((account) => account.role === 'STAFF').token;
-  tokens.BOARD = accounts.find((account) => account.role === 'BOARD').token;
+
+  const legacyAccounts = [
+    { role: 'STAFF', name: 'School Office Staff', email: 'school.staff@cheleta.test' },
+    { role: 'BOARD', name: 'Board Member', email: 'board.member@cheleta.test' }
+  ].map(({ role, name, email }) => {
+    const result = db.prepare(
+      'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)'
+    ).run(name, email, hashPassword('legacyPass123'), role);
+    return { role, id: Number(result.lastInsertRowid) };
+  });
+  const boardId = legacyAccounts.find((account) => account.role === 'BOARD').id;
+  const staffLogin = await request('/api/login', {
+    method: 'POST',
+    body: { email: 'school.staff@cheleta.test', password: 'legacyPass123', role: 'STAFF' }
+  });
+  const boardLogin = await request('/api/login', {
+    method: 'POST',
+    body: { email: 'board.member@cheleta.test', password: 'legacyPass123', role: 'BOARD' }
+  });
+  tokens.STAFF = staffLogin.json.data.token;
+  tokens.BOARD = boardLogin.json.data.token;
 
   const studentLearners = await request('/api/learners', { token: tokens.STUDENT });
   assert.deepEqual(studentLearners.json.data.map((item) => item.id), [learner.id]);
@@ -462,20 +519,20 @@ test('admins provision learner, staff, and board accounts with role-specific acc
   });
   assert.equal(studentAccountCreate.response.status, 403);
 
-  const deactivated = await request(`/api/staff/${accounts.find((account) => account.role === 'BOARD').id}`, {
+  const deactivated = await request(`/api/staff/${boardId}`, {
     token: tokens.ADMIN,
     method: 'DELETE'
   });
   assert.equal(deactivated.response.status, 200);
   const disabledLogin = await request('/api/login', {
     method: 'POST',
-    body: { email: 'board.member@cheleta.test', password: 'boardPass123', role: 'BOARD' }
+    body: { email: 'board.member@cheleta.test', password: 'legacyPass123', role: 'BOARD' }
   });
   assert.equal(disabledLogin.response.status, 401);
 });
 
 test('role claims cannot be changed through request parameters', async () => {
-  const dashboard = await request('/api/dashboard?role=CSR_PARTNER', { token: tokens.TEACHER });
+  const dashboard = await request('/api/dashboard?role=ADMIN', { token: tokens.TEACHER });
   assert.equal(dashboard.response.status, 200);
   assert.equal(dashboard.json.data.summary[0].label, 'Assigned learners');
 });
@@ -576,4 +633,227 @@ test('attendance persists idempotently and validates statuses', async () => {
 
   const parentRecords = await request('/api/attendance', { token: tokens.PARENT });
   assert.ok(parentRecords.json.data.some((entry) => entry.date === record.date && entry.status === 'ABSENT'));
+});
+
+test('timetables and lesson plans are scoped to assigned and linked classes', async () => {
+  const teacherRoster = await request('/api/teachers', { token: tokens.ADMIN });
+  const teacherId = teacherRoster.json.data.find((teacher) => teacher.email === 'teacher@cheleta.test').id;
+  const schedule = await request('/api/timetable', {
+    token: tokens.TEACHER,
+    method: 'POST',
+    body: {
+      className: 'Grade 5A',
+      dayOfWeek: 1,
+      startTime: '08:00',
+      endTime: '09:00',
+      subject: 'Mathematics',
+      room: 'Room 2'
+    }
+  });
+  assert.equal(schedule.response.status, 201);
+
+  const conflict = await request('/api/timetable', {
+    token: tokens.TEACHER,
+    method: 'POST',
+    body: {
+      className: 'Grade 5A',
+      dayOfWeek: 1,
+      startTime: '08:30',
+      endTime: '09:30',
+      subject: 'English'
+    }
+  });
+  assert.equal(conflict.response.status, 409);
+
+  const parentSchedule = await request('/api/timetable', { token: tokens.PARENT });
+  assert.ok(parentSchedule.json.data.some((entry) => entry.className === 'Grade 5A'));
+  assert.equal(parentSchedule.json.data.some((entry) => entry.className === 'Grade 3B'), false);
+
+  const lesson = await request('/api/lesson-plans', {
+    token: tokens.TEACHER,
+    method: 'POST',
+    body: {
+      className: 'Grade 5A',
+      date: '2026-10-12',
+      subject: 'Mathematics',
+      title: 'Fractions',
+      objectives: 'Compare simple fractions.',
+      plan: 'Use fraction strips and partner practice.'
+    }
+  });
+  assert.equal(lesson.response.status, 201);
+
+  const parentLessons = await request('/api/lesson-plans', { token: tokens.PARENT });
+  assert.ok(parentLessons.json.data.some((entry) => entry.id === lesson.json.data.id));
+  const progress = await request(`/api/lesson-plans/${lesson.json.data.id}/progress`, {
+    token: tokens.TEACHER,
+    method: 'PUT',
+    body: { progressStatus: 'COMPLETED', progressNote: 'Most learners met the objective.' }
+  });
+  assert.equal(progress.response.status, 200);
+
+  const adminTimetable = await request('/api/timetable', {
+    token: tokens.ADMIN,
+    method: 'POST',
+    body: {
+      className: 'Grade 5A',
+      teacherId,
+      dayOfWeek: 2,
+      startTime: '08:00',
+      endTime: '08:40',
+      subject: 'Kiswahili'
+    }
+  });
+  assert.equal(adminTimetable.response.status, 201);
+});
+
+test('report cards combine attendance, CBC results, and scoped teacher comments', async () => {
+  const learner = (await request('/api/learners', { token: tokens.PARENT })).json.data[0];
+  const query = new URLSearchParams({
+    learnerId: learner.id,
+    term: 'Term 1',
+    startDate: '2026-01-01',
+    endDate: '2027-01-01'
+  });
+  const comment = await request(`/api/report-cards/${learner.id}/comment`, {
+    token: tokens.TEACHER,
+    method: 'PUT',
+    body: { term: 'Term 1', comment: 'Amina is growing in confidence.' }
+  });
+  assert.equal(comment.response.status, 200);
+
+  const report = await request(`/api/report-cards?${query}`, { token: tokens.PARENT });
+  assert.equal(report.response.status, 200);
+  assert.ok(report.json.data.attendance.total >= 1);
+  assert.ok(report.json.data.assessments.length >= 1);
+  assert.equal(report.json.data.teacherComment.comment, 'Amina is growing in confidence.');
+
+  const unrelated = await request('/api/report-cards?learnerId=2&term=Term%201&startDate=2026-01-01&endDate=2027-01-01', {
+    token: tokens.PARENT
+  });
+  assert.equal(unrelated.response.status, 400);
+  const deniedWrite = await request(`/api/report-cards/${learner.id}/comment`, {
+    token: tokens.PARENT,
+    method: 'PUT',
+    body: { term: 'Term 1', comment: 'Not allowed.' }
+  });
+  assert.equal(deniedWrite.response.status, 403);
+});
+
+test('wellbeing records are available only to admins and assigned teachers', async () => {
+  const learner = (await request('/api/learners', { token: tokens.PARENT })).json.data[0];
+  const created = await request('/api/wellbeing', {
+    token: tokens.TEACHER,
+    method: 'POST',
+    body: { learnerId: learner.id, category: 'WELLBEING', concern: 'A private test record.' }
+  });
+  assert.equal(created.response.status, 201);
+
+  const teacherCases = await request('/api/wellbeing', { token: tokens.TEACHER });
+  assert.ok(teacherCases.json.data.some((item) => item.id === created.json.data.id));
+  const adminCases = await request('/api/wellbeing', { token: tokens.ADMIN });
+  assert.ok(adminCases.json.data.some((item) => item.id === created.json.data.id));
+
+  const parentDenied = await request('/api/wellbeing', { token: tokens.PARENT });
+  assert.equal(parentDenied.response.status, 403);
+  const studentDenied = await request('/api/wellbeing', { token: tokens.STUDENT });
+  assert.equal(studentDenied.response.status, 403);
+
+  const update = await request(`/api/wellbeing/${created.json.data.id}`, {
+    token: tokens.TEACHER,
+    method: 'PUT',
+    body: { status: 'FOLLOW_UP', followUp: 'Contact the school support lead.' }
+  });
+  assert.equal(update.response.status, 200);
+});
+
+test('notifications, inventory, exports, analytics, and admin backups work', async () => {
+  const previousAtUsername = process.env.AT_USERNAME;
+  const previousAtApiKey = process.env.AT_API_KEY;
+  delete process.env.AT_USERNAME;
+  delete process.env.AT_API_KEY;
+  try {
+    const phone = await request('/api/me/phone', {
+      token: tokens.PARENT,
+      method: 'PUT',
+      body: { phone: '+254712345678', smsOptIn: true }
+    });
+    assert.equal(phone.response.status, 200);
+
+    const learner = (await request('/api/learners', { token: tokens.PARENT })).json.data[0];
+    const absent = await request('/api/attendance', {
+      token: tokens.TEACHER,
+      method: 'POST',
+      body: { records: [{
+        learnerId: learner.id,
+        status: 'ABSENT',
+        date: '2026-11-01',
+        clientRecordId: 'absence-alert-test'
+      }] }
+    });
+    assert.equal(absent.response.status, 201);
+    const parentNotifications = await request('/api/notifications', { token: tokens.PARENT });
+    const absence = parentNotifications.json.data.find((item) => item.type === 'ABSENCE');
+    assert.ok(absence);
+    assert.equal(absence.smsStatus, 'NOT_CONFIGURED');
+
+    const announcement = await request('/api/announcements', {
+      token: tokens.ADMIN,
+      method: 'POST',
+      body: { title: 'Family meeting', message: 'Please attend the meeting.', priority: 'High' }
+    });
+    assert.equal(announcement.response.status, 201);
+    const notificationsAfterAnnouncement = await request('/api/notifications', { token: tokens.PARENT });
+    assert.ok(notificationsAfterAnnouncement.json.data.some((item) => item.title === 'Family meeting'));
+
+    const item = await request('/api/inventory', {
+      token: tokens.ADMIN,
+      method: 'POST',
+      body: { name: 'Kiswahili reader', category: 'BOOK', identifier: 'BOOK-01', location: 'Library', quantity: 1 }
+    });
+    assert.equal(item.response.status, 201);
+    const loan = await request('/api/library/loans', {
+      token: tokens.ADMIN,
+      method: 'POST',
+      body: { itemId: item.json.data.id, learnerId: learner.id, checkoutDate: '2026-11-01', dueDate: '2026-11-15' }
+    });
+    assert.equal(loan.response.status, 201);
+    const parentLoans = await request('/api/library/loans', { token: tokens.PARENT });
+    assert.ok(parentLoans.json.data.some((record) => record.id === loan.json.data.id));
+    const returned = await request(`/api/library/loans/${loan.json.data.id}/return`, {
+      token: tokens.ADMIN,
+      method: 'PUT'
+    });
+    assert.equal(returned.response.status, 200);
+
+    const parentExport = await fetch(`${baseUrl}/api/exports/learners.csv`, {
+      headers: { Authorization: 'Bearer ' + tokens.PARENT }
+    });
+    assert.equal(parentExport.status, 200);
+    assert.match(await parentExport.text(), /Amina Otieno/);
+    const secondParentExport = await fetch(`${baseUrl}/api/exports/learners.csv`, {
+      headers: { Authorization: 'Bearer ' + tokens.PARENT }
+    });
+    assert.doesNotMatch(await secondParentExport.text(), /Daniel Kibet/);
+
+    const summary = await request('/api/reports/summary?days=30', { token: tokens.ADMIN });
+    assert.equal(summary.response.status, 200);
+    assert.ok(Array.isArray(summary.json.data.followUp));
+    const parentSummary = await request('/api/reports/summary', { token: tokens.PARENT });
+    assert.equal(parentSummary.response.status, 403);
+
+    const backup = await fetch(`${baseUrl}/api/admin/backup`, {
+      headers: { Authorization: 'Bearer ' + tokens.ADMIN }
+    });
+    assert.equal(backup.status, 200);
+    assert.match(backup.headers.get('content-type'), /sqlite3/);
+    assert.equal((await backup.arrayBuffer()).byteLength > 100, true);
+    const parentBackup = await request('/api/admin/backup', { token: tokens.PARENT });
+    assert.equal(parentBackup.response.status, 403);
+  } finally {
+    if (previousAtUsername === undefined) delete process.env.AT_USERNAME;
+    else process.env.AT_USERNAME = previousAtUsername;
+    if (previousAtApiKey === undefined) delete process.env.AT_API_KEY;
+    else process.env.AT_API_KEY = previousAtApiKey;
+  }
 });

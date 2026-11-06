@@ -8,7 +8,7 @@ The school needs a way to centralize learner information, communication, attenda
 
 ## Proposed Solution
 
-A responsive school management platform with separate roles for admin, teacher, parent, learner, school staff, Board of Management, and CSR partner. It includes school progress reporting, a grade-matched learning library, mentorship, student suggestions, and offline attendance recording.
+A responsive school management platform with separate roles for admin, teacher, parent, learner, school staff, and Board of Management. Administrators have the school-wide progress and impact views. It includes a grade-matched learning library, mentorship, student suggestions, and offline attendance recording.
 
 ## Development Approach
 

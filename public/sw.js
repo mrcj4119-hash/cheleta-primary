@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cheleta-primary-cache-v2';
+const CACHE_NAME = 'cheleta-primary-cache-v6';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

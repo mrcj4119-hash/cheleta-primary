@@ -4,7 +4,7 @@ Cheleta Primary School was selected as the focus institution because it represen
 
 ## Research and Findings
 
-The project identified needs around attendance tracking, communication gaps, learner support, and access to digital learning resources. Teachers need a clear way to record attendance and update academic information. Parents need visibility into learner progress and announcements. CSR partners need aggregate impact data without sensitive child information.
+The project identified needs around attendance tracking, communication gaps, learner support, and access to digital learning resources. Teachers need a clear way to record attendance and update academic information. Parents need visibility into learner progress and announcements. The current application provides aggregate impact information to administrators; it does not have a dedicated CSR partner dashboard.
 
 ## Proposed Technology Solution
 

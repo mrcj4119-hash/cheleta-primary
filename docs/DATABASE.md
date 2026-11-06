@@ -18,8 +18,10 @@ The local backend uses SQLite through Node's built-in `node:sqlite` module. The 
 - mentorship programs and learner enrolments
 - student suggestions and review status
 - Board, staff, and student account roles and account status
+- class timetables, lesson plans, term report comments, and parent notifications/SMS delivery status
+- confidential learner-support cases, inventory stock, and library loans
 
-`schema_migrations` records applied versions. Later migrations add learner archives, class and parent-comment records, Grade 9, student/staff/Board roles, learning resources, mentorship, and suggestions. `npm run migrate` initializes the schema, applies pending migrations, and seeds local example users and learning material. The operation is idempotent.
+`schema_migrations` records applied versions. Later migrations add learner archives, class and parent-comment records, Grade 9, student/staff/Board roles, learning resources, mentorship, suggestions, and school-tools data. `npm run migrate` initializes the schema, applies pending migrations, and seeds local example users and learning material. The operation is idempotent.
 
 ## Integrity and privacy
 
@@ -28,6 +30,10 @@ The local backend uses SQLite through Node's built-in `node:sqlite` module. The 
 - assessment levels and attendance statuses are constrained in SQLite
 - learner and teacher records can be archived/deactivated without deleting linked history
 - parent accounts are joined only to their linked learners
+- timetable, report-card, and library-loan responses follow linked-learner or assigned-class scopes
+- safeguarding access is limited to admins and teachers assigned to the learner's class, with access recorded in the audit log
+- parent SMS requires a valid international number and explicit opt-in; delivery status is persisted
+- stock counts cannot be reduced below open book loans
 - SQLite files are ignored by Git
 - demo passwords are stored as salted scrypt hashes
 
