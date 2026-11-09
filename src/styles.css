@@ -382,18 +382,6 @@ button.role.active {
   margin: 0;
 }
 
-.demo-accounts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 18px;
-}
-
-.demo-accounts .secondary {
-  padding: 0.55rem 0.7rem;
-  font-size: 0.78rem;
-}
-
 .form-grid {
   display: grid;
   gap: 14px;
@@ -438,6 +426,41 @@ button.role.active {
   border: 1px solid #cbbba8;
   border-radius: 12px;
   min-height: 48px;
+}
+
+.password-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.password-input-wrap input {
+  padding-right: 3.1rem;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.65rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  color: var(--primary-strong);
+  background: var(--surface-soft);
+}
+
+.password-toggle svg {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .form-grid > button,

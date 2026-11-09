@@ -2,15 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SchoolTools from './SchoolTools';
 
 const roles = ['ADMIN', 'TEACHER', 'PARENT', 'STUDENT', 'BOARD', 'STAFF'];
-const demoRoles = ['ADMIN', 'TEACHER', 'PARENT', 'STUDENT'];
 const rubricLevels = ['EE', 'ME', 'AE', 'BE'];
 const attendanceStatuses = ['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'];
-const demoLogins = {
-  ADMIN: { email: 'admin@cheleta.test', password: 'admin123' },
-  TEACHER: { email: 'teacher@cheleta.test', password: 'teacher123' },
-  PARENT: { email: 'parent@cheleta.test', password: 'parent123' },
-  STUDENT: { email: 'student@cheleta.test', password: 'student123' }
-};
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyLearner = { firstName: '', lastName: '', grade: 1, className: '', stream: 'A', support: 'On track', status: 'ACTIVE' };
 const emptyTeacher = { name: '', email: '', phone: '', qualification: '', classes: '', password: '', status: 'ACTIVE' };
@@ -72,7 +65,8 @@ function App() {
   const [assessments, setAssessments] = useState([]);
   const [impact, setImpact] = useState([]);
   const [queue, setQueue] = useState([]);
-  const [loginForm, setLoginForm] = useState({ ...demoLogins.ADMIN, role: 'ADMIN' });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'ADMIN' });
+  const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [parentRegistration, setParentRegistration] = useState(emptyParentRegistration);
   const [parentLinkSelections, setParentLinkSelections] = useState({});
@@ -329,10 +323,6 @@ function App() {
     setQueue([]);
     setSection('Dashboard');
     setStatusText('You have signed out.');
-  };
-
-  const chooseDemoRole = (role) => {
-    setLoginForm({ ...(demoLogins[role] || { email: '', password: '' }), role });
   };
 
   const saveLearner = async (event) => {
@@ -820,17 +810,27 @@ function App() {
                 <p className="muted">Sign in with your school account.</p>
                 <form onSubmit={handleLogin} className="form-grid">
                   <label>Email<input required type="email" autoComplete="username" value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} /></label>
-                  <label>Password<input required type="password" autoComplete="current-password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} /></label>
-                  <label>Role<select value={loginForm.role} onChange={(event) => chooseDemoRole(event.target.value)}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+                  <label>Password
+                    <span className="password-input-wrap">
+                      <input required type={isLoginPasswordVisible ? 'text' : 'password'} autoComplete="current-password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} />
+                      <button
+                        className="password-toggle"
+                        type="button"
+                        aria-label={isLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                        aria-pressed={isLoginPasswordVisible}
+                        onClick={() => setIsLoginPasswordVisible((visible) => !visible)}
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+                          <circle cx="12" cy="12" r="3" />
+                          {!isLoginPasswordVisible && <path d="m3 3 18 18" />}
+                        </svg>
+                      </button>
+                    </span>
+                  </label>
+                  <label>Role<select value={loginForm.role} onChange={(event) => setLoginForm({ ...loginForm, role: event.target.value })}>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
                   <button className="primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
                 </form>
-                <div className="demo-accounts">
-                  {demoRoles.map((role) => (
-                    <button className="secondary" type="button" key={role} onClick={() => chooseDemoRole(role)}>
-                      {role.replace('_', ' ')}
-                    </button>
-                  ))}
-                </div>
                 <p className="muted">Are you a parent? <button className="text-button" type="button" onClick={() => { setAuthMode('register'); setStatusText(''); }}>Create an account</button></p>
               </>
             ) : (
